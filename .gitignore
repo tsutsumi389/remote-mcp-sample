@@ -1,0 +1,28 @@
+# Node
+node_modules/
+.pnpm-store/
+dist/
+.vite/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Lock files (commit-by-choice; here we ship without lockfiles for clean sample)
+# pnpm-lock.yaml
+# uv.lock
+
+# Env
+.env
+.env.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,38 @@
+services:
+  mcp-app:
+    build:
+      context: ./apps/mcp-app
+      target: dev
+    working_dir: /workspace
+    volumes:
+      - ./apps/mcp-app:/workspace
+      - mcp-app-node_modules:/workspace/node_modules
+      - mcp-app-dist:/workspace/dist
+    command: pnpm build:watch
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /workspace/dist/index.html"]
+      interval: 2s
+      timeout: 1s
+      retries: 60
+      start_period: 5s
+
+  mcp-server:
+    build:
+      context: ./apps/mcp-server
+      target: dev
+    working_dir: /workspace
+    volumes:
+      - ./apps/mcp-server:/workspace
+      - mcp-app-dist:/bundle:ro
+    environment:
+      MCP_APP_BUNDLE_PATH: /bundle/index.html
+    ports:
+      - "3001:3001"
+    command: uv run uvicorn mcp_server.server:app --host 0.0.0.0 --port 3001 --reload --reload-dir /workspace/src
+    depends_on:
+      mcp-app:
+        condition: service_healthy
+
+volumes:
+  mcp-app-node_modules:
+  mcp-app-dist:
