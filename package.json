@@ -1,0 +1,12 @@
+{
+  "name": "remote-mcp-sample",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remote MCP server sample: Python FastMCP server + React MCP App",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "build": "pnpm -C apps/mcp-app build",
+    "dev:ui": "pnpm -C apps/mcp-app dev",
+    "watch:ui": "pnpm -C apps/mcp-app build:watch"
+  }
+}
