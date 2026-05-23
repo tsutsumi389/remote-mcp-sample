@@ -1,20 +1,25 @@
+# Build context is the repository root so the pnpm workspace lockfile is
+# reachable. Compose sets `dockerfile: apps/mcp-app/Dockerfile`.
 FROM node:22-alpine AS base
 RUN corepack enable
 WORKDIR /workspace
 
 
 FROM base AS dev
-# Copy manifests first so the layer is reused when only source changes.
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --no-frozen-lockfile
-# Source is bind-mounted at runtime; we still copy here so the image is
-# self-contained for one-off `docker run` use.
-COPY . .
+# Workspace manifests first so the install layer can be reused.
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY apps/mcp-app/package.json ./apps/mcp-app/
+RUN pnpm install --frozen-lockfile --filter mcp-app...
+# Source is bind-mounted at runtime; copy here so the image is self-contained.
+COPY apps/mcp-app/ ./apps/mcp-app/
+WORKDIR /workspace/apps/mcp-app
 CMD ["pnpm", "build:watch"]
 
 
 FROM base AS prod
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --no-frozen-lockfile
-COPY . .
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY apps/mcp-app/package.json ./apps/mcp-app/
+RUN pnpm install --frozen-lockfile --filter mcp-app...
+COPY apps/mcp-app/ ./apps/mcp-app/
+WORKDIR /workspace/apps/mcp-app
 RUN pnpm build
