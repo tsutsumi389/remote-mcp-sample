@@ -1,3 +1,5 @@
+# Build context is the repository root so the uv workspace lockfile is
+# reachable. Compose sets `dockerfile: apps/mcp-server/Dockerfile`.
 FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -15,17 +17,22 @@ WORKDIR /workspace
 
 
 FROM base AS dev
-# In dev, source is bind-mounted. We install deps from the project metadata
-# so the .venv is pre-warmed inside the image.
-COPY pyproject.toml ./
-COPY src ./src
-RUN uv sync
-CMD ["uv", "run", "uvicorn", "mcp_server.server:app", "--host", "0.0.0.0", "--port", "3001", "--reload", "--reload-dir", "/workspace/src"]
+# Workspace lock + member manifest first so the install layer can be reused.
+COPY pyproject.toml uv.lock ./
+COPY apps/mcp-server/pyproject.toml ./apps/mcp-server/
+WORKDIR /workspace/apps/mcp-server
+RUN uv sync --frozen
+# Source is bind-mounted at runtime; copy here so the image is self-contained.
+COPY apps/mcp-server/src ./src
+COPY apps/mcp-server/tests ./tests
+CMD ["uv", "run", "uvicorn", "mcp_server.server:app", "--host", "0.0.0.0", "--port", "3001", "--reload", "--reload-dir", "/workspace/apps/mcp-server/src"]
 
 
 FROM base AS prod
-COPY pyproject.toml ./
-COPY src ./src
-RUN uv sync --no-dev
+COPY pyproject.toml uv.lock ./
+COPY apps/mcp-server/pyproject.toml ./apps/mcp-server/
+WORKDIR /workspace/apps/mcp-server
+RUN uv sync --frozen --no-dev
+COPY apps/mcp-server/src ./src
 EXPOSE 3001
 CMD ["uv", "run", "uvicorn", "mcp_server.server:app", "--host", "0.0.0.0", "--port", "3001"]
