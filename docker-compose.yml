@@ -33,6 +33,13 @@ services:
       # Bind to host loopback only — the MCP endpoint has no auth.
       - "127.0.0.1:3001:3001"
     command: uv run uvicorn mcp_server.server:app --host 0.0.0.0 --port 3001 --reload --reload-dir /workspace/apps/mcp-server/src
+    healthcheck:
+      # Hit the FastAPI /health route (no curl in the image, so use Python).
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:3001/health').status==200 else 1)\""]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 10s
     depends_on:
       mcp-app:
         condition: service_healthy

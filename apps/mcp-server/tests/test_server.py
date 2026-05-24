@@ -57,6 +57,18 @@ def test_read_bundle_falls_back_when_missing(tmp_path, monkeypatch) -> None:
     assert "MCP App bundle not found" in html
 
 
+def test_health_endpoint_returns_ok() -> None:
+    from fastapi.testclient import TestClient
+
+    from mcp_server.server import app
+
+    # The `with` block runs the FastAPI lifespan (starts the MCP session manager).
+    with TestClient(app) as client:
+        resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
 def _structured(result) -> dict:
     # FastMCP.call_tool returns (content_list, structured_content) in recent
     # versions; tolerate either tuple shape or a single dict.

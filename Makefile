@@ -18,7 +18,7 @@ install: ## Install Node and Python dependencies on host (for editor / direct ru
 	uv sync
 
 test: ## Run Python MCP server unit tests
-	uv run --project apps/mcp-server pytest
+	cd apps/mcp-server && uv run pytest
 
 clean: ## Remove build artifacts and containers / volumes
 	docker compose down -v

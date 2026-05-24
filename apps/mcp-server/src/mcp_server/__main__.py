@@ -1,4 +1,4 @@
-"""Run the MCP server with uvicorn (no auto-reload).
+"""Run the FastAPI app (MCP Streamable HTTP + plain HTTP routes) with uvicorn.
 
 For development, prefer:
     uv run uvicorn mcp_server.server:app --reload --host 127.0.0.1 --port 3001

@@ -1,10 +1,11 @@
 [project]
 name = "mcp-server"
 version = "0.1.0"
-description = "Sample remote MCP server (FastMCP + Streamable HTTP) hosting the Counter MCP App"
+description = "Sample remote MCP server (FastAPI + FastMCP Streamable HTTP) hosting the Counter MCP App"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.9.0",
+    "fastapi>=0.135",
     "uvicorn[standard]>=0.30",
     "anyio>=4.4",
 ]
