@@ -1,6 +1,6 @@
-# Remote MCP Sample — Python FastMCP + React MCP App
+# Remote MCP Sample — Python FastAPI + FastMCP + React MCP App
 
-リモート MCP サーバー（Streamable HTTP）と、その上で動く **MCP App**（ホスト内 iframe で動くインタラクティブ UI）を一つにまとめた最小モノレポサンプルです。
+リモート MCP サーバー（FastAPI 上に FastMCP の Streamable HTTP をマウント）と、その上で動く **MCP App**（ホスト内 iframe で動くインタラクティブ UI）を一つにまとめた最小モノレポサンプルです。サーバーは FastAPI ベースなので、MCP の `POST /mcp` に加えて通常の HTTP リクエスト（`GET /health` など）も受け付けます。
 
 題材は **カウンター + 履歴チャート**:
 
@@ -15,12 +15,15 @@ MCP Host (basic-host / Claude Desktop / etc.)
   └─ iframe: React MCP App (single-file HTML bundle)
         │ callServerTool / tool result
         ▼
-Streamable HTTP  http://localhost:3001/mcp
-  └─ Python MCP Server (FastMCP + uvicorn)
-        ├─ tools: increment_counter / reset_counter / get_counter
-        │   ※ 各ツールに _meta["ui/resourceUri"] = "ui://counter"
-        └─ resource: ui://counter (text/html;profile=mcp-app)
-              → apps/mcp-app/dist/index.html を返す
+HTTP  http://localhost:3001
+  └─ Python Server (FastAPI + uvicorn)
+        ├─ GET  /health           → {"status":"ok"}（通常の HTTP リクエスト）
+        ├─ GET  /docs, /openapi.json → FastAPI 自動ドキュメント
+        └─ POST /mcp (Streamable HTTP) → FastMCP をマウント
+              ├─ tools: increment_counter / reset_counter / get_counter
+              │   ※ 各ツールに _meta["ui/resourceUri"] = "ui://counter"
+              └─ resource: ui://counter (text/html;profile=mcp-app)
+                    → apps/mcp-app/dist/index.html を返す
 ```
 
 ## リポジトリ構成
@@ -28,7 +31,7 @@ Streamable HTTP  http://localhost:3001/mcp
 ```
 .
 ├── apps/
-│   ├── mcp-server/   # Python: FastMCP + Streamable HTTP
+│   ├── mcp-server/   # Python: FastAPI + FastMCP (Streamable HTTP)
 │   └── mcp-app/      # React: MCP Apps SDK (@modelcontextprotocol/ext-apps)
 ├── docker-compose.yml
 ├── Makefile
@@ -49,7 +52,7 @@ make dev
 ```
 
 - `mcp-app` コンテナが `pnpm build:watch` で `dist/index.html` を継続生成
-- `mcp-server` コンテナが `uvicorn ... --reload` で起動し、`http://localhost:3001/mcp` で待ち受け
+- `mcp-server` コンテナ（FastAPI + uvicorn）が `--reload` で起動。MCP は `http://localhost:3001/mcp`、ヘルスチェックは `http://localhost:3001/health` で待ち受け
 
 MCP ホストの設定で、Streamable HTTP の URL に `http://localhost:3001/mcp` を追加してください。
 
@@ -62,6 +65,17 @@ make test       # Python ユニットテスト
 ```
 
 ## 動作確認
+
+### 0. ヘルスチェック (curl)
+
+FastAPI の通常エンドポイント。MCP ハンドシェイク不要で叩けます:
+
+```bash
+curl -s http://localhost:3001/health
+# => {"status":"ok"}
+```
+
+FastAPI の自動ドキュメントは `http://localhost:3001/docs`（Swagger UI）で確認できます。
 
 ### 1. ツール一覧を確認 (curl)
 
@@ -122,5 +136,6 @@ SERVERS='["http://localhost:3001/mcp"]' npm run start
 
 - 複数 MCP App: `ui://other` リソースを増やし、別ツール群に `_meta.ui.resourceUri` を設定
 - 永続化: `state.py` を SQLite / Redis 接続に差し替え
-- 認証: `Starlette` ミドルウェアを `streamable_http_app()` の前段に挟む
+- 認証: FastAPI のミドルウェア / 依存（`Depends`）を MCP マウント（`app.mount("/", ...)`）の前段に挟む。`/health` など公開ルートだけ認証から除外する構成も可能
+- 通常の REST API 追加: `server.py` の FastAPI `app` に `@app.get(...)` / `APIRouter` を足すだけ（MCP は `POST /mcp` のまま共存）
 - ストリーミング入力: 大きな入力を扱うツールに `ontoolinputpartial` ハンドラを追加（[shadertoy 例](https://github.com/modelcontextprotocol/ext-apps/tree/main/examples/shadertoy-server) 参照）
