@@ -1,12 +1,24 @@
 import { useCallback, useState } from "react";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 
-import { Chart } from "./Chart";
+import { CounterScreen } from "./CounterScreen";
+import { TasksScreen } from "./TasksScreen";
+import {
+  isCounterData,
+  isTaskList,
+  type CounterData,
+  type TaskList,
+} from "./types";
+import { useToolCall } from "./useToolCall";
 
-export type HistoryPoint = { ts: number; value: number };
-export type CounterData = { value: number; history: HistoryPoint[] };
-
-const EMPTY: CounterData = { value: 0, history: [] };
+// This single bundle backs two UI resources (ui://counter, ui://tasks). The
+// host loads one iframe per resource render and delivers that tool's result via
+// `ontoolresult`. The notification does not reliably carry the resource URI, so
+// we route to a screen by the *shape* of the structured content received.
+type Screen =
+  | { kind: "loading" }
+  | { kind: "counter"; data: CounterData }
+  | { kind: "tasks"; data: TaskList };
 
 function applyHostContext(ctx: {
   theme?: string;
@@ -22,23 +34,29 @@ function applyHostContext(ctx: {
 }
 
 export function App() {
-  const [data, setData] = useState<CounterData>(EMPTY);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [screen, setScreen] = useState<Screen>({ kind: "loading" });
+  const [routeError, setRouteError] = useState<string | null>(null);
+
+  // Single source of truth for routing, used by both `ontoolresult` (model-
+  // initiated) and each screen's tool-call responses. Check `isTaskList` first
+  // — the two shapes are mutually exclusive, but tasks-first is defensive.
+  const applyResult = useCallback((structuredContent: unknown) => {
+    if (isTaskList(structuredContent)) {
+      setRouteError(null);
+      setScreen({ kind: "tasks", data: structuredContent });
+    } else if (isCounterData(structuredContent)) {
+      setRouteError(null);
+      setScreen({ kind: "counter", data: structuredContent });
+    } else if (structuredContent !== undefined) {
+      setRouteError("Unexpected tool result payload from server");
+    }
+  }, []);
 
   const { app, isConnected } = useApp({
-    appInfo: { name: "Counter App", version: "1.0.0" },
+    appInfo: { name: "MCP Apps Sample", version: "1.0.0" },
     capabilities: {},
     onAppCreated: (createdApp) => {
-      // Hydrate from model-initiated tool result.
-      createdApp.ontoolresult = (event) => {
-        const structuredContent = event?.structuredContent;
-        if (isCounterData(structuredContent)) {
-          setData(structuredContent);
-        } else if (structuredContent !== undefined) {
-          setError("Unexpected tool result payload from server");
-        }
-      };
+      createdApp.ontoolresult = (event) => applyResult(event?.structuredContent);
       // Hook signature only — illustrative, not used in this sample.
       createdApp.ontoolinputpartial = () => {};
       // Theme + safe-area follow the host.
@@ -47,99 +65,48 @@ export function App() {
     },
   });
 
-  const callTool = useCallback(
-    async (name: string, args: Record<string, unknown> = {}) => {
-      if (!app) return;
-      setBusy(true);
-      setError(null);
-      try {
-        const result = await app.callServerTool({ name, arguments: args });
-        const structured = result?.structuredContent;
-        if (isCounterData(structured)) {
-          setData(structured);
-        } else {
-          setError(`Unexpected response shape from ${name}`);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [app],
-  );
+  const { callTool, busy, error: toolError } = useToolCall(app);
+  const error = toolError ?? routeError;
+
+  if (screen.kind === "tasks") {
+    return (
+      <TasksScreen
+        data={screen.data}
+        isConnected={isConnected}
+        busy={busy}
+        error={error}
+        callTool={callTool}
+        applyResult={applyResult}
+      />
+    );
+  }
+
+  if (screen.kind === "counter") {
+    return (
+      <CounterScreen
+        data={screen.data}
+        isConnected={isConnected}
+        busy={busy}
+        error={error}
+        callTool={callTool}
+        applyResult={applyResult}
+      />
+    );
+  }
 
   return (
     <main className="main">
       <header className="header">
-        <h1 className="heading">Counter</h1>
+        <h1 className="heading">MCP Apps Sample</h1>
         <span className="muted">{isConnected ? "connected" : "connecting…"}</span>
       </header>
-
       <section className="value-card">
-        <div className="value-label">current value</div>
-        <div className="value">{data.value}</div>
+        <p className="muted">
+          Waiting for data — invoke a tool (e.g. <code>get_counter</code> or{" "}
+          <code>list_tasks</code>) to load a screen.
+        </p>
       </section>
-
-      <section className="chart-card">
-        <Chart history={data.history} />
-      </section>
-
-      <section className="actions">
-        <button
-          type="button"
-          className="btn"
-          disabled={busy || !isConnected}
-          onClick={() => callTool("increment_counter", { by: 1 })}
-        >
-          +1
-        </button>
-        <button
-          type="button"
-          className="btn"
-          disabled={busy || !isConnected}
-          onClick={() => callTool("increment_counter", { by: 5 })}
-        >
-          +5
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={busy || !isConnected}
-          onClick={() => callTool("reset_counter")}
-        >
-          Reset
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          disabled={busy || !isConnected}
-          onClick={() => callTool("get_counter")}
-        >
-          Refresh
-        </button>
-      </section>
-
       {error && <p className="error">{error}</p>}
     </main>
-  );
-}
-
-function isCounterData(value: unknown): value is CounterData {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  if (typeof v.value !== "number" || !Number.isFinite(v.value)) return false;
-  if (!Array.isArray(v.history)) return false;
-  return v.history.every(isHistoryPoint);
-}
-
-function isHistoryPoint(value: unknown): value is HistoryPoint {
-  if (!value || typeof value !== "object") return false;
-  const p = value as Record<string, unknown>;
-  return (
-    typeof p.ts === "number" &&
-    Number.isFinite(p.ts) &&
-    typeof p.value === "number" &&
-    Number.isFinite(p.value)
   );
 }

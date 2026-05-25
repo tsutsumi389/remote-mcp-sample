@@ -18,12 +18,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from mcp.server.fastmcp import FastMCP
 
-from mcp_server import resources, tools
+from mcp_server import resources, tasks, tools
 
 mcp = FastMCP("counter-sample")  # streamable_http_path defaults to "/mcp"
 
 tools.register(mcp)
 resources.register(mcp)
+tasks.register(mcp)
 
 # Build the MCP Streamable HTTP ASGI app once. This also lazily creates the
 # StreamableHTTP session manager that the FastAPI lifespan must run.
