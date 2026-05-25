@@ -1,4 +1,4 @@
-import type { HistoryPoint } from "./App";
+import type { HistoryPoint } from "./types";
 
 type Props = {
   history: HistoryPoint[];

@@ -189,3 +189,66 @@ body,
   color: var(--danger-fg);
   font-size: 12px;
 }
+
+/* Tasks screen */
+.task-form {
+  display: flex;
+  gap: 8px;
+}
+
+.task-input {
+  flex: 1;
+  padding: 10px 12px;
+  font: inherit;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.task-input:disabled {
+  opacity: 0.5;
+}
+
+.task-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.task-table th {
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.task-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.task-table tr:last-child td {
+  border-bottom: none;
+}
+
+.task-title.done {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.task-created {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.task-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 16px;
+  font-size: 13px;
+}

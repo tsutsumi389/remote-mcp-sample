@@ -2,11 +2,19 @@
 
 リモート MCP サーバー（FastAPI 上に FastMCP の Streamable HTTP をマウント）と、その上で動く **MCP App**（ホスト内 iframe で動くインタラクティブ UI）を一つにまとめた最小モノレポサンプルです。サーバーは FastAPI ベースなので、MCP の `POST /mcp` に加えて通常の HTTP リクエスト（`GET /health` など）も受け付けます。
 
-題材は **カウンター + 履歴チャート**:
+本サンプルには **2 つの画面** が含まれ、どちらも「サーバーの構造化データ（`structuredContent`）を MCP App 画面に連携して表示する」パターンを示します。両画面は **同一の単一ファイルバンドル** を共有し、受信データの形に応じて React 側が画面を切り替えます。
+
+### 1. カウンター + 履歴チャート（`ui://counter`）
 
 - モデル（LLM）が `increment_counter` ツールを呼ぶ → 値が増え、UI iframe が描画される
 - ユーザーが UI 上のボタンを押す → `callServerTool` 経由でサーバーの `increment_counter` / `reset_counter` を呼ぶ
 - 双方向通信、ホストテーマ追従、`_meta.ui.resourceUri` リンクが一通り見られます
+
+### 2. タスク一覧テーブル（`ui://tasks`）
+
+- `list_tasks` がサーバーの `TaskList`（行データ）を返す → 画面がテーブルとして表示
+- UI のフォームから `add_task`、チェックボックスから `toggle_task` を呼び、返ってきた `TaskList` で再描画
+- 「サーバー → 画面のデータ連携」を表形式で分かりやすく示す追加サンプルです
 
 ## アーキテクチャ
 
@@ -22,8 +30,11 @@ HTTP  http://localhost:3001
         └─ POST /mcp (Streamable HTTP) → FastMCP をマウント
               ├─ tools: increment_counter / reset_counter / get_counter
               │   ※ 各ツールに _meta["ui/resourceUri"] = "ui://counter"
-              └─ resource: ui://counter (text/html;profile=mcp-app)
-                    → apps/mcp-app/dist/index.html を返す
+              ├─ tools: list_tasks / add_task / toggle_task
+              │   ※ 各ツールに _meta["ui/resourceUri"] = "ui://tasks"
+              ├─ resource: ui://counter (text/html;profile=mcp-app)
+              └─ resource: ui://tasks   (text/html;profile=mcp-app)
+                    ※ どちらも同じ apps/mcp-app/dist/index.html を返す
 ```
 
 ## リポジトリ構成
@@ -91,13 +102,37 @@ curl -s -X POST http://localhost:3001/mcp \
 ### 2. UI リソースを確認
 
 ```bash
+# Counter 画面のバンドル
 curl -s -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"ui://counter"}}'
+
+# Tasks 画面のバンドル（同じ HTML が返る）
+curl -s -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"ui://tasks"}}'
 ```
 
-レスポンスの `contents[0].text` が `<!doctype html>` で始まる単一ファイル HTML になっていれば OK です。
+レスポンスの `contents[0].text` が `<!doctype html>` で始まる単一ファイル HTML になっていれば OK です。`ui://counter` と `ui://tasks` は同一バンドルを返します（画面の出し分けは React 側がデータ形で判定）。
+
+### 2-1. タスク一覧のデータ連携を確認
+
+```bash
+# 一覧取得（シード済みタスクが返る）
+curl -s -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}'
+
+# 追加 → 返却された structuredContent.tasks に行が増える
+#   {"name":"add_task","arguments":{"title":"Buy milk"}}
+# 完了トグル（一覧の id を指定）
+#   {"name":"toggle_task","arguments":{"id":1}}
+```
+
+> 注: 素の curl での `tools/call` は Streamable HTTP セッションの初期化が必要な場合があります。確実に往復を確認したいときは `make test`（pytest, インプロセス実行）か basic-host を使ってください。
 
 ### 3. MCP ホストから接続
 
@@ -129,12 +164,14 @@ SERVERS='["http://localhost:3001/mcp"]' npm run start
 
 - **状態は in-memory のみ**: マルチプロセス・再起動で値が消えます。永続化は学習の発展課題として残しています。
 - **認証なし**: ローカル開発専用。リモート公開時は OAuth2.1 等を別途追加してください。
-- **MCP Apps `_meta`**: ツール定義の `_meta["ui/resourceUri"]` がリソースに対応する HTML を指定します（キーは `@modelcontextprotocol/ext-apps` の `RESOURCE_URI_META_KEY` 定数と同一）。本サンプルでは `FastMCP.tool(..., meta={"ui/resourceUri": "ui://counter"})` を利用しています。
+- **MCP Apps `_meta`**: ツール定義の `_meta["ui/resourceUri"]` がリソースに対応する HTML を指定します（キーは `@modelcontextprotocol/ext-apps` の `RESOURCE_URI_META_KEY` 定数と同一）。本サンプルでは `FastMCP.tool(..., meta={"ui/resourceUri": "ui://counter"})` / `"ui://tasks"` を利用しています。
 - **リソース MIME**: `text/html;profile=mcp-app`（同パッケージの `RESOURCE_MIME_TYPE` 定数）。
+- **1 バンドル × 複数画面**: Counter / Tasks は同じ単一ファイルバンドルを共有します。`ontoolresult` 通知は解決済みリソース URI を確実には含まないため、React 側（`App.tsx`）は受信した `structuredContent` の形（型ガード `isCounterData` / `isTaskList`）で表示画面を切り替えます。最初のツール結果が来るまでは中立な「読み込み中」画面を表示します。
+- **データ連携の要点**: ツールは Pydantic モデル（`CounterSnapshot` / `TaskList`）を返し、FastMCP が `CallToolResult.structuredContent` を自動生成。React 側は `ontoolresult` / `callServerTool` の `structuredContent` を読んで描画します。サーバー実装は `apps/mcp-server/src/mcp_server/tasks.py` を参照。
 
 ## 拡張ヒント
 
-- 複数 MCP App: `ui://other` リソースを増やし、別ツール群に `_meta.ui.resourceUri` を設定
+- 複数 MCP App: `ui://other` リソースを増やし、別ツール群に `_meta.ui.resourceUri` を設定（Tasks 画面が実例。`apps/mcp-server/src/mcp_server/tasks.py` + `apps/mcp-app/src/TasksScreen.tsx`）
 - 永続化: `state.py` を SQLite / Redis 接続に差し替え
 - 認証: FastAPI のミドルウェア / 依存（`Depends`）を MCP マウント（`app.mount("/", ...)`）の前段に挟む。`/health` など公開ルートだけ認証から除外する構成も可能
 - 通常の REST API 追加: `server.py` の FastAPI `app` に `@app.get(...)` / `APIRouter` を足すだけ（MCP は `POST /mcp` のまま共存）
