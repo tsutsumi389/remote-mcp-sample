@@ -13,7 +13,9 @@ RUN pnpm install --frozen-lockfile --filter mcp-app...
 # Source is bind-mounted at runtime; copy here so the image is self-contained.
 COPY apps/mcp-app/ ./apps/mcp-app/
 WORKDIR /workspace/apps/mcp-app
-CMD ["pnpm", "build:watch"]
+# Build once, then watch + serve the single-file bundle over HTTP (port 4173).
+EXPOSE 4173
+CMD ["pnpm", "serve"]
 
 
 FROM base AS prod

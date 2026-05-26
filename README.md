@@ -20,7 +20,7 @@
 
 ```
 MCP Host (basic-host / Claude Desktop / etc.)
-  └─ iframe: React MCP App (single-file HTML bundle)
+  └─ iframe: React MCP App (single-file HTML bundle / srcdoc 描画)
         │ callServerTool / tool result
         ▼
 HTTP  http://localhost:3001
@@ -34,8 +34,15 @@ HTTP  http://localhost:3001
               │   ※ 各ツールに _meta["ui/resourceUri"] = "ui://tasks"
               ├─ resource: ui://counter (text/html;profile=mcp-app)
               └─ resource: ui://tasks   (text/html;profile=mcp-app)
-                    ※ どちらも同じ apps/mcp-app/dist/index.html を返す
+                    │ resources/read のたびに HTTP で取得して中継（インライン返却）
+                    ▼
+HTTP  http://mcp-app:4173/ (host: http://localhost:4173/)
+  └─ MCP App 配信サーバ (vite preview)
+        └─ apps/mcp-app/dist/index.html を配信
+              ※ ui://counter / ui://tasks は同じ単一ファイルを返す
 ```
+
+HTML の**配信責務は mcp-app 側**（`vite preview`）にあります。MCP Apps SDK はインライン HTML のみ対応（ホストは `resource.contents[0].text` を iframe `srcdoc` で描画し、アプリの URL から直接ロードできない）ため、Python サーバはその HTML を HTTP で取得してインラインで**中継**します。
 
 ## リポジトリ構成
 
@@ -62,8 +69,8 @@ HTTP  http://localhost:3001
 make dev
 ```
 
-- `mcp-app` コンテナが `pnpm build:watch` で `dist/index.html` を継続生成
-- `mcp-server` コンテナ（FastAPI + uvicorn）が `--reload` で起動。MCP は `http://localhost:3001/mcp`、ヘルスチェックは `http://localhost:3001/health` で待ち受け
+- `mcp-app` コンテナが `pnpm serve`（初回ビルド → `vite build --watch` + `vite preview`）で `dist/index.html` を `http://mcp-app:4173/` に配信。ホストからは `http://localhost:4173/`（ループバック公開）で閲覧可
+- `mcp-server` コンテナ（FastAPI + uvicorn）が `--reload` で起動。リソース取得時に `MCP_APP_BUNDLE_URL`（既定 `http://mcp-app:4173/`）から HTML を中継。MCP は `http://localhost:3001/mcp`、ヘルスチェックは `http://localhost:3001/health` で待ち受け
 
 MCP ホストの設定で、Streamable HTTP の URL に `http://localhost:3001/mcp` を追加してください。
 
@@ -73,6 +80,16 @@ MCP ホストの設定で、Streamable HTTP の URL に `http://localhost:3001/m
 make install    # pnpm install + uv sync
 make build      # apps/mcp-app/dist/index.html 生成
 make test       # Python ユニットテスト
+```
+
+Docker を使わず 2 ターミナルで動かす場合（中継方式）:
+
+```bash
+# ターミナル1: MCP App を :4173 で配信（初回ビルド → watch + preview）
+make serve-app
+
+# ターミナル2: MCP サーバを起動（:4173 から HTML を中継）
+make serve-server   # MCP_APP_BUNDLE_URL=http://localhost:4173/ を自動設定
 ```
 
 ## 動作確認
@@ -158,7 +175,7 @@ SERVERS='["http://localhost:3001/mcp"]' npm run start
 | 変更 | 反映方法 |
 |------|---------|
 | Python ファイル | `uvicorn --reload` が自動再起動 |
-| React (`apps/mcp-app/src/**`) | `vite build --watch` が `dist/index.html` を更新。ホストでツールを再呼び出し（or リソースを再フェッチ）すると反映 |
+| React (`apps/mcp-app/src/**`) | `vite build --watch` が `dist/index.html` を更新 → `vite preview` が配信 → サーバーが再フェッチして反映。ホストでツール再呼び出し（or リソース再フェッチ）すれば反映され、両サービスの再起動は不要 |
 
 ## 設計上の注意
 
@@ -166,6 +183,8 @@ SERVERS='["http://localhost:3001/mcp"]' npm run start
 - **認証なし**: ローカル開発専用。リモート公開時は OAuth2.1 等を別途追加してください。
 - **MCP Apps `_meta`**: ツール定義の `_meta["ui/resourceUri"]` がリソースに対応する HTML を指定します（キーは `@modelcontextprotocol/ext-apps` の `RESOURCE_URI_META_KEY` 定数と同一）。本サンプルでは `FastMCP.tool(..., meta={"ui/resourceUri": "ui://counter"})` / `"ui://tasks"` を利用しています。
 - **リソース MIME**: `text/html;profile=mcp-app`（同パッケージの `RESOURCE_MIME_TYPE` 定数）。
+- **配信は mcp-app 側 / サーバは中継**: HTML を配信するのは mcp-app の `vite preview`（`MCP_APP_BUNDLE_URL`）です。Python サーバは `resources/read` のたびに HTTP で取得してインライン返却します（接続不可・タイムアウト・非200・サイズ超過時は安全なプレースホルダ HTML にフォールバック）。
+- **単一ファイルが必須な理由**: `@modelcontextprotocol/ext-apps` はインライン HTML のみ対応で、ホストは `resource.contents[0].text` を iframe `srcdoc` で描画します。外部 URL からの読み込みができないため、サーバが返す HTML は自己完結している必要があり、ビルドは単一ファイル（`vite-plugin-singlefile`）のままにしています。
 - **1 バンドル × 複数画面**: Counter / Tasks は同じ単一ファイルバンドルを共有します。`ontoolresult` 通知は解決済みリソース URI を確実には含まないため、React 側（`App.tsx`）は受信した `structuredContent` の形（型ガード `isCounterData` / `isTaskList`）で表示画面を切り替えます。最初のツール結果が来るまでは中立な「読み込み中」画面を表示します。
 - **データ連携の要点**: ツールは Pydantic モデル（`CounterSnapshot` / `TaskList`）を返し、FastMCP が `CallToolResult.structuredContent` を自動生成。React 側は `ontoolresult` / `callServerTool` の `structuredContent` を読んで描画します。サーバー実装は `apps/mcp-server/src/mcp_server/tasks.py` を参照。
 

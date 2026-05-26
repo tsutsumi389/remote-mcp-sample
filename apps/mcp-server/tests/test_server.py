@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from mcp_server import resources, state as state_module
@@ -12,11 +13,38 @@ from mcp_server.tasks import UI_TASKS_RESOURCE_URI, task_store
 _COUNTER_TOOLS = {"increment_counter", "reset_counter", "get_counter"}
 _TASK_TOOLS = {"list_tasks", "add_task", "toggle_task"}
 
+_SAMPLE_BUNDLE_HTML = "<!doctype html><html><body>sample bundle</body></html>"
+
+
+def _html_response(html: str, status: int = 200) -> httpx.Response:
+    return httpx.Response(
+        status,
+        content=html.encode("utf-8"),
+        request=httpx.Request("GET", "http://mcp-app.test/"),
+    )
+
 
 @pytest.fixture(autouse=True)
 def reset_state() -> None:
     state_module.state.reset()
     task_store.reset()
+
+
+@pytest.fixture
+def mock_bundle_http(monkeypatch) -> None:
+    """Patch the HTTP layer so ``read_bundle()`` returns a known bundle.
+
+    Patching ``httpx.Client.get`` (rather than ``resources.read_bundle``)
+    covers both the ``ui://counter`` and ``ui://tasks`` resource readers with a
+    single patch *and* exercises the real status/size/decode branches. Applied
+    explicitly (not autouse) so it does not hijack ``TestClient`` HTTP in the
+    ``/health`` test, which is also built on ``httpx.Client``.
+    """
+
+    def fake_get(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        return _html_response(_SAMPLE_BUNDLE_HTML)
+
+    monkeypatch.setattr(httpx.Client, "get", fake_get)
 
 
 async def test_counter_tools_carry_counter_ui_meta() -> None:
@@ -83,7 +111,7 @@ async def test_toggle_task_round_trip() -> None:
     assert next(t for t in toggled if t["id"] == task_id)["done"] is False
 
 
-async def test_tasks_ui_resource_returns_html_with_apps_profile() -> None:
+async def test_tasks_ui_resource_returns_html_with_apps_profile(mock_bundle_http) -> None:
     contents = await mcp.read_resource(UI_TASKS_RESOURCE_URI)
     assert contents, "ui://tasks returned no content"
     first = contents[0]
@@ -108,7 +136,7 @@ async def test_increment_then_reset_round_trip() -> None:
     assert structured["history"] == []
 
 
-async def test_ui_resource_returns_html_with_apps_profile() -> None:
+async def test_ui_resource_returns_html_with_apps_profile(mock_bundle_http) -> None:
     contents = await mcp.read_resource(UI_RESOURCE_URI)
     assert contents, "ui://counter returned no content"
     first = contents[0]
@@ -117,10 +145,32 @@ async def test_ui_resource_returns_html_with_apps_profile() -> None:
     assert "<html" in text or "<!doctype html>" in text.lower()
 
 
-def test_read_bundle_falls_back_when_missing(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("MCP_APP_BUNDLE_PATH", str(tmp_path / "missing.html"))
-    html = resources.read_bundle()
-    assert "MCP App bundle not found" in html
+def test_read_bundle_success_returns_fetched_html(mock_bundle_http) -> None:
+    # mock_bundle_http serves _SAMPLE_BUNDLE_HTML over the patched HTTP layer.
+    assert resources.read_bundle() == _SAMPLE_BUNDLE_HTML
+
+
+def test_read_bundle_falls_back_when_fetch_fails(monkeypatch) -> None:
+    def boom(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        raise httpx.ConnectError("refused", request=httpx.Request("GET", "http://x/"))
+
+    monkeypatch.setattr(httpx.Client, "get", boom)
+    assert "not reachable" in resources.read_bundle()
+
+
+def test_read_bundle_falls_back_on_non_200(monkeypatch) -> None:
+    monkeypatch.setattr(
+        httpx.Client, "get", lambda self, *a, **k: _html_response("<html/>", status=503)
+    )
+    assert "not reachable" in resources.read_bundle()
+
+
+def test_read_bundle_falls_back_when_oversized(monkeypatch) -> None:
+    big = "x" * (resources._MAX_BUNDLE_BYTES + 1)
+    monkeypatch.setattr(
+        httpx.Client, "get", lambda self, *a, **k: _html_response(big)
+    )
+    assert "not reachable" in resources.read_bundle()
 
 
 def test_health_endpoint_returns_ok() -> None:
