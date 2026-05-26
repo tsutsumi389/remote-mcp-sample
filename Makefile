@@ -13,6 +13,13 @@ down: ## Stop dev environment
 build: ## Build React MCP App bundle (apps/mcp-app/dist/index.html)
 	pnpm -C apps/mcp-app build
 
+serve-app: ## Serve the MCP App bundle on host (build once, watch + preview on :4173)
+	pnpm -C apps/mcp-app serve
+
+serve-server: ## Run the MCP server on host, relaying the bundle over HTTP from :4173
+	cd apps/mcp-server && MCP_APP_BUNDLE_URL=http://localhost:4173/ \
+		uv run uvicorn mcp_server.server:app --host 127.0.0.1 --port 3001 --reload --reload-dir src
+
 install: ## Install Node and Python dependencies on host (for editor / direct runs)
 	pnpm install
 	uv sync
@@ -24,4 +31,4 @@ clean: ## Remove build artifacts and containers / volumes
 	docker compose down -v
 	rm -rf apps/mcp-app/dist apps/mcp-app/node_modules apps/mcp-server/.venv
 
-.PHONY: help dev down build install test clean
+.PHONY: help dev down build serve-app serve-server install test clean

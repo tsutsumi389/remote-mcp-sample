@@ -8,12 +8,15 @@ services:
     volumes:
       - ./apps/mcp-app:/workspace/apps/mcp-app
       - mcp-app-node_modules:/workspace/apps/mcp-app/node_modules
-      - mcp-app-dist:/workspace/apps/mcp-app/dist
-    command: pnpm build:watch
+    command: pnpm serve
+    ports:
+      # Loopback-only publish so the bundle can be browsed from the host.
+      - "127.0.0.1:4173:4173"
     healthcheck:
-      test: ["CMD-SHELL", "test -f /workspace/apps/mcp-app/dist/index.html"]
+      # Healthy = the vite preview server answers HTTP (node:alpine has busybox wget, no curl).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4173/ || exit 1"]
       interval: 2s
-      timeout: 1s
+      timeout: 2s
       retries: 60
       start_period: 30s
 
@@ -26,9 +29,9 @@ services:
     volumes:
       - ./apps/mcp-server:/workspace/apps/mcp-server
       - mcp-server-venv:/workspace/apps/mcp-server/.venv
-      - mcp-app-dist:/bundle:ro
     environment:
-      MCP_APP_BUNDLE_PATH: /bundle/index.html
+      # Relay the bundle over HTTP from the mcp-app preview server (compose DNS).
+      MCP_APP_BUNDLE_URL: http://mcp-app:4173/
     ports:
       # Bind to host loopback only — the MCP endpoint has no auth.
       - "127.0.0.1:3001:3001"
@@ -46,5 +49,4 @@ services:
 
 volumes:
   mcp-app-node_modules:
-  mcp-app-dist:
   mcp-server-venv:
