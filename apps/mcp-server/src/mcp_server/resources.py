@@ -49,10 +49,8 @@ def read_bundle() -> str:
 
     Fetched on every call so dev rebuilds (``vite build --watch``) are picked
     up. Runs on a FastMCP worker thread (sync resource readers are off-loaded
-    via anyio), so a blocking ``httpx.Client`` call is fine here.
-
-    Stdlib ``urllib.request`` is a zero-dependency fallback if ``httpx`` ever
-    stops being a transitive dependency of ``mcp``.
+    via anyio), so a blocking ``httpx.Client`` call is fine here. ``httpx`` is
+    a transitive dependency of ``mcp``.
     """
     url = os.environ.get(_BUNDLE_URL_ENV) or _DEFAULT_BUNDLE_URL
     try:
