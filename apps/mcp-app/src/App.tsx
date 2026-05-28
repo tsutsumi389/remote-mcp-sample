@@ -2,23 +2,28 @@ import { useCallback, useState } from "react";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 
 import { CounterScreen } from "./CounterScreen";
+import { DashboardScreen } from "./DashboardScreen";
 import { TasksScreen } from "./TasksScreen";
 import {
   isCounterData,
+  isDashboard,
   isTaskList,
   type CounterData,
+  type Dashboard,
   type TaskList,
 } from "./types";
 import { useToolCall } from "./useToolCall";
 
-// This single bundle backs two UI resources (ui://counter, ui://tasks). The
-// host loads one iframe per resource render and delivers that tool's result via
-// `ontoolresult`. The notification does not reliably carry the resource URI, so
-// we route to a screen by the *shape* of the structured content received.
+// This single bundle backs three UI resources (ui://counter, ui://tasks,
+// ui://dashboard). The host loads one iframe per resource render and delivers
+// that tool's result via `ontoolresult`. The notification does not reliably
+// carry the resource URI, so we route to a screen by the *shape* of the
+// structured content received.
 type Screen =
   | { kind: "loading" }
   | { kind: "counter"; data: CounterData }
-  | { kind: "tasks"; data: TaskList };
+  | { kind: "tasks"; data: TaskList }
+  | { kind: "dashboard"; data: Dashboard };
 
 function applyHostContext(ctx: {
   theme?: string;
@@ -38,10 +43,13 @@ export function App() {
   const [routeError, setRouteError] = useState<string | null>(null);
 
   // Single source of truth for routing, used by both `ontoolresult` (model-
-  // initiated) and each screen's tool-call responses. Check `isTaskList` first
-  // — the two shapes are mutually exclusive, but tasks-first is defensive.
+  // initiated) and each screen's tool-call responses. The three shapes are
+  // mutually exclusive; order is defensive (most specific keys first).
   const applyResult = useCallback((structuredContent: unknown) => {
-    if (isTaskList(structuredContent)) {
+    if (isDashboard(structuredContent)) {
+      setRouteError(null);
+      setScreen({ kind: "dashboard", data: structuredContent });
+    } else if (isTaskList(structuredContent)) {
       setRouteError(null);
       setScreen({ kind: "tasks", data: structuredContent });
     } else if (isCounterData(structuredContent)) {
@@ -67,6 +75,19 @@ export function App() {
 
   const { callTool, busy, error: toolError } = useToolCall(app);
   const error = toolError ?? routeError;
+
+  if (screen.kind === "dashboard") {
+    return (
+      <DashboardScreen
+        data={screen.data}
+        isConnected={isConnected}
+        busy={busy}
+        error={error}
+        callTool={callTool}
+        applyResult={applyResult}
+      />
+    );
+  }
 
   if (screen.kind === "tasks") {
     return (
@@ -102,8 +123,9 @@ export function App() {
       </header>
       <section className="value-card">
         <p className="muted">
-          Waiting for data — invoke a tool (e.g. <code>get_counter</code> or{" "}
-          <code>list_tasks</code>) to load a screen.
+          Waiting for data — invoke a tool (e.g. <code>get_counter</code>,{" "}
+          <code>list_tasks</code>, or <code>get_dashboard</code>) to load a
+          screen.
         </p>
       </section>
       {error && <p className="error">{error}</p>}

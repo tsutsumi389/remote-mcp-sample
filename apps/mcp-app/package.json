@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "React MCP App (Counter + Chart) — bundled as a single HTML file for the Counter MCP App resource",
+  "description": "React MCP App (Counter / Tasks / Dashboard) — bundled as a single HTML file shared across multiple MCP App resources",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b --noEmit && vite build",

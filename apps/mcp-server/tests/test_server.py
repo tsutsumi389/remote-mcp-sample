@@ -6,12 +6,14 @@ import httpx
 import pytest
 
 from mcp_server import resources, state as state_module
+from mcp_server.dashboard import UI_DASHBOARD_RESOURCE_URI, dashboard_store
 from mcp_server.resources import UI_RESOURCE_MIME, UI_RESOURCE_URI
 from mcp_server.server import mcp
 from mcp_server.tasks import UI_TASKS_RESOURCE_URI, task_store
 
 _COUNTER_TOOLS = {"increment_counter", "reset_counter", "get_counter"}
 _TASK_TOOLS = {"list_tasks", "add_task", "toggle_task"}
+_DASHBOARD_TOOLS = {"get_dashboard", "refresh_dashboard", "acknowledge_alert"}
 
 _SAMPLE_BUNDLE_HTML = "<!doctype html><html><body>sample bundle</body></html>"
 
@@ -28,6 +30,7 @@ def _html_response(html: str, status: int = 200) -> httpx.Response:
 def reset_state() -> None:
     state_module.state.reset()
     task_store.reset()
+    dashboard_store.reset()
 
 
 @pytest.fixture
@@ -114,6 +117,87 @@ async def test_toggle_task_round_trip() -> None:
 async def test_tasks_ui_resource_returns_html_with_apps_profile(mock_bundle_http) -> None:
     contents = await mcp.read_resource(UI_TASKS_RESOURCE_URI)
     assert contents, "ui://tasks returned no content"
+    first = contents[0]
+    assert first.mime_type == UI_RESOURCE_MIME
+    text = first.content
+    assert "<html" in text or "<!doctype html>" in text.lower()
+
+
+async def test_dashboard_tools_expose_ui_dashboard_meta() -> None:
+    tool_specs = await mcp.list_tools()
+    by_name = {t.name: t for t in tool_specs}
+    assert _DASHBOARD_TOOLS <= set(by_name)
+
+    for name in _DASHBOARD_TOOLS:
+        meta = by_name[name].meta or {}
+        assert meta.get("ui/resourceUri") == UI_DASHBOARD_RESOURCE_URI, (
+            f"{name} missing _meta['ui/resourceUri']"
+        )
+
+
+async def test_get_dashboard_returns_seeded_snapshot() -> None:
+    data = _structured(await mcp.call_tool("get_dashboard", {}))
+
+    kpis = data["kpis"]
+    assert isinstance(kpis, list) and len(kpis) == 4
+    assert [k["label"] for k in kpis] == ["Users", "Sales", "Errors", "Uptime"]
+
+    trend = data["trend"]
+    assert len(trend) == 7
+    assert [p["label"] for p in trend] == [
+        "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
+    ]
+    assert all(isinstance(p["value"], int) for p in trend)
+
+    activity = data["activity"]
+    assert len(activity) == 3
+    assert {a["severity"] for a in activity} <= {"info", "warn", "error"}
+    assert isinstance(data["refreshed_at"], (int, float))
+
+
+async def test_refresh_dashboard_rolls_trend_window_deterministically() -> None:
+    before = _structured(await mcp.call_tool("get_dashboard", {}))
+    after = _structured(await mcp.call_tool("refresh_dashboard", {}))
+
+    # Trend window rolled by one bucket: oldest dropped, next label appended.
+    assert len(after["trend"]) == len(before["trend"]) == 7
+    assert [p["label"] for p in after["trend"][:-1]] == [
+        p["label"] for p in before["trend"][1:]
+    ]
+    assert after["trend"][-1]["label"] == "Mon"  # cycles from Sun
+
+    # First tick swing is `(1 * 5) % 11 - 5 == 0`, so last trend value equals
+    # the prior last value.
+    assert after["trend"][-1]["value"] == before["trend"][-1]["value"]
+
+    # KPI "Users" advanced by the deterministic step (+3).
+    users_before = next(k for k in before["kpis"] if k["label"] == "Users")["value"]
+    users_after = next(k for k in after["kpis"] if k["label"] == "Users")["value"]
+    assert users_after == users_before + 3
+
+
+async def test_acknowledge_alert_removes_targeted_entry_and_is_idempotent() -> None:
+    before = _structured(await mcp.call_tool("get_dashboard", {}))
+    assert len(before["activity"]) == 3
+    alert_id = before["activity"][0]["id"]
+
+    after = _structured(
+        await mcp.call_tool("acknowledge_alert", {"alert_id": alert_id})
+    )
+    remaining_ids = [a["id"] for a in after["activity"]]
+    assert alert_id not in remaining_ids
+    assert len(after["activity"]) == 2
+
+    # Unknown id is a no-op (does not raise, does not mutate).
+    still = _structured(
+        await mcp.call_tool("acknowledge_alert", {"alert_id": "does-not-exist"})
+    )
+    assert [a["id"] for a in still["activity"]] == remaining_ids
+
+
+async def test_dashboard_ui_resource_returns_html_with_apps_profile(mock_bundle_http) -> None:
+    contents = await mcp.read_resource(UI_DASHBOARD_RESOURCE_URI)
+    assert contents, "ui://dashboard returned no content"
     first = contents[0]
     assert first.mime_type == UI_RESOURCE_MIME
     text = first.content
