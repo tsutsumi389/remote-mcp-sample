@@ -4,26 +4,30 @@ import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import { CounterScreen } from "./CounterScreen";
 import { DashboardScreen } from "./DashboardScreen";
 import { TasksScreen } from "./TasksScreen";
+import { YoutubeScreen } from "./YoutubeScreen";
 import {
   isCounterData,
   isDashboard,
   isTaskList,
+  isYoutubeSearchResults,
   type CounterData,
   type Dashboard,
   type TaskList,
+  type YoutubeSearchResults,
 } from "./types";
 import { useToolCall } from "./useToolCall";
 
-// This single bundle backs three UI resources (ui://counter, ui://tasks,
-// ui://dashboard). The host loads one iframe per resource render and delivers
-// that tool's result via `ontoolresult`. The notification does not reliably
-// carry the resource URI, so we route to a screen by the *shape* of the
-// structured content received.
+// This single bundle backs four UI resources (ui://counter, ui://tasks,
+// ui://dashboard, ui://youtube). The host loads one iframe per resource render
+// and delivers that tool's result via `ontoolresult`. The notification does not
+// reliably carry the resource URI, so we route to a screen by the *shape* of
+// the structured content received.
 type Screen =
   | { kind: "loading" }
   | { kind: "counter"; data: CounterData }
   | { kind: "tasks"; data: TaskList }
-  | { kind: "dashboard"; data: Dashboard };
+  | { kind: "dashboard"; data: Dashboard }
+  | { kind: "youtube"; data: YoutubeSearchResults };
 
 function applyHostContext(ctx: {
   theme?: string;
@@ -49,6 +53,9 @@ export function App() {
     if (isDashboard(structuredContent)) {
       setRouteError(null);
       setScreen({ kind: "dashboard", data: structuredContent });
+    } else if (isYoutubeSearchResults(structuredContent)) {
+      setRouteError(null);
+      setScreen({ kind: "youtube", data: structuredContent });
     } else if (isTaskList(structuredContent)) {
       setRouteError(null);
       setScreen({ kind: "tasks", data: structuredContent });
@@ -102,6 +109,19 @@ export function App() {
     );
   }
 
+  if (screen.kind === "youtube") {
+    return (
+      <YoutubeScreen
+        data={screen.data}
+        isConnected={isConnected}
+        busy={busy}
+        error={error}
+        callTool={callTool}
+        applyResult={applyResult}
+      />
+    );
+  }
+
   if (screen.kind === "counter") {
     return (
       <CounterScreen
@@ -124,8 +144,8 @@ export function App() {
       <section className="value-card">
         <p className="muted">
           Waiting for data — invoke a tool (e.g. <code>get_counter</code>,{" "}
-          <code>list_tasks</code>, or <code>get_dashboard</code>) to load a
-          screen.
+          <code>list_tasks</code>, <code>get_dashboard</code>, or{" "}
+          <code>search_youtube</code>) to load a screen.
         </p>
       </section>
       {error && <p className="error">{error}</p>}

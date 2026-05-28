@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/barchart.tsx","./src/chart.tsx","./src/counterscreen.tsx","./src/dashboardscreen.tsx","./src/tasksscreen.tsx","./src/main.tsx","./src/types.ts","./src/usetoolcall.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/barchart.tsx","./src/chart.tsx","./src/counterscreen.tsx","./src/dashboardscreen.tsx","./src/tasksscreen.tsx","./src/youtubescreen.tsx","./src/main.tsx","./src/types.ts","./src/usetoolcall.ts"],"version":"5.9.3"}
