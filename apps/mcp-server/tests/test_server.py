@@ -10,10 +10,12 @@ from mcp_server.dashboard import UI_DASHBOARD_RESOURCE_URI, dashboard_store
 from mcp_server.resources import UI_RESOURCE_MIME, UI_RESOURCE_URI
 from mcp_server.server import mcp
 from mcp_server.tasks import UI_TASKS_RESOURCE_URI, task_store
+from mcp_server.youtube import UI_YOUTUBE_RESOURCE_URI, youtube_store
 
 _COUNTER_TOOLS = {"increment_counter", "reset_counter", "get_counter"}
 _TASK_TOOLS = {"list_tasks", "add_task", "toggle_task"}
 _DASHBOARD_TOOLS = {"get_dashboard", "refresh_dashboard", "acknowledge_alert"}
+_YOUTUBE_TOOLS = {"search_youtube"}
 
 _SAMPLE_BUNDLE_HTML = "<!doctype html><html><body>sample bundle</body></html>"
 
@@ -31,6 +33,7 @@ def reset_state() -> None:
     state_module.state.reset()
     task_store.reset()
     dashboard_store.reset()
+    youtube_store.reset()
 
 
 @pytest.fixture
@@ -198,6 +201,75 @@ async def test_acknowledge_alert_removes_targeted_entry_and_is_idempotent() -> N
 async def test_dashboard_ui_resource_returns_html_with_apps_profile(mock_bundle_http) -> None:
     contents = await mcp.read_resource(UI_DASHBOARD_RESOURCE_URI)
     assert contents, "ui://dashboard returned no content"
+    first = contents[0]
+    assert first.mime_type == UI_RESOURCE_MIME
+    text = first.content
+    assert "<html" in text or "<!doctype html>" in text.lower()
+
+
+async def test_search_youtube_tool_exposes_ui_youtube_meta() -> None:
+    tool_specs = await mcp.list_tools()
+    by_name = {t.name: t for t in tool_specs}
+    assert _YOUTUBE_TOOLS <= set(by_name)
+
+    for name in _YOUTUBE_TOOLS:
+        meta = by_name[name].meta or {}
+        assert meta.get("ui/resourceUri") == UI_YOUTUBE_RESOURCE_URI, (
+            f"{name} missing _meta['ui/resourceUri']"
+        )
+
+
+async def test_search_youtube_empty_query_returns_full_catalog() -> None:
+    data = _structured(await mcp.call_tool("search_youtube", {"query": ""}))
+
+    assert isinstance(data["results"], list)
+    assert isinstance(data["total_count"], int)
+    # Empty query matches everything; total_count reflects the whole catalog.
+    assert data["total_count"] >= 1
+    first = data["results"][0]
+    assert isinstance(first["id"], str)
+    assert isinstance(first["title"], str)
+    assert isinstance(first["channel"], str)
+    assert isinstance(first["view_count"], int)
+    assert isinstance(first["published_at"], (int, float))
+    assert isinstance(first["thumbnail_hue"], int)
+
+
+async def test_search_youtube_filters_by_keyword() -> None:
+    full = _structured(await mcp.call_tool("search_youtube", {"query": ""}))
+    filtered = _structured(await mcp.call_tool("search_youtube", {"query": "python"}))
+
+    assert 0 < filtered["total_count"] < full["total_count"]
+    # Every result must match the keyword in title or channel.
+    for video in filtered["results"]:
+        haystack = f"{video['title']} {video['channel']}".lower()
+        assert "python" in haystack
+
+
+async def test_search_youtube_results_sorted_by_views_desc() -> None:
+    data = _structured(await mcp.call_tool("search_youtube", {"query": ""}))
+    views = [v["view_count"] for v in data["results"]]
+    assert views == sorted(views, reverse=True)
+
+
+async def test_search_youtube_limit_caps_results() -> None:
+    data = _structured(await mcp.call_tool("search_youtube", {"query": "", "limit": 3}))
+    assert len(data["results"]) == 3
+    # total_count still reports the full match count, not the capped page.
+    assert data["total_count"] >= 3
+
+
+async def test_search_youtube_unknown_keyword_returns_empty() -> None:
+    data = _structured(
+        await mcp.call_tool("search_youtube", {"query": "zzz-no-such-video"})
+    )
+    assert data["results"] == []
+    assert data["total_count"] == 0
+
+
+async def test_youtube_ui_resource_returns_html_with_apps_profile(mock_bundle_http) -> None:
+    contents = await mcp.read_resource(UI_YOUTUBE_RESOURCE_URI)
+    assert contents, "ui://youtube returned no content"
     first = contents[0]
     assert first.mime_type == UI_RESOURCE_MIME
     text = first.content

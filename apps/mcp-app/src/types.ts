@@ -128,3 +128,48 @@ export function isDashboard(value: unknown): value is Dashboard {
   if (!Array.isArray(d.activity) || !d.activity.every(isActivityItem)) return false;
   return typeof d.refreshed_at === "number" && Number.isFinite(d.refreshed_at);
 }
+
+export type YoutubeVideo = {
+  id: string;
+  title: string;
+  channel: string;
+  view_count: number;
+  published_at: number; // seconds since epoch (multiply by 1000 for Date)
+  thumbnail_hue: number; // 0-359; drives a deterministic placeholder SVG
+};
+
+export type YoutubeSearchResults = {
+  query: string;
+  results: YoutubeVideo[];
+  total_count: number;
+};
+
+export function isYoutubeVideo(value: unknown): value is YoutubeVideo {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.title === "string" &&
+    typeof v.channel === "string" &&
+    typeof v.view_count === "number" &&
+    Number.isFinite(v.view_count) &&
+    typeof v.published_at === "number" &&
+    Number.isFinite(v.published_at) &&
+    typeof v.thumbnail_hue === "number" &&
+    Number.isFinite(v.thumbnail_hue)
+  );
+}
+
+export function isYoutubeSearchResults(
+  value: unknown,
+): value is YoutubeSearchResults {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.query === "string" &&
+    typeof o.total_count === "number" &&
+    Number.isFinite(o.total_count) &&
+    Array.isArray(o.results) &&
+    o.results.every(isYoutubeVideo)
+  );
+}
