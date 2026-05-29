@@ -173,3 +173,43 @@ export function isYoutubeSearchResults(
     o.results.every(isYoutubeVideo)
   );
 }
+
+// Articles sample: a list view (`ArticleList`) that drills into a detail view
+// (`ArticleDetail`). The two payloads differ in shape — the summary has no
+// `body`, the detail does — so the App routes to the right screen by guard.
+export type ArticleSummary = {
+  id: string;
+  title: string;
+  author: string;
+  published_at: number; // seconds since epoch (multiply by 1000 for Date)
+  tags: string[];
+};
+
+export type ArticleDetail = ArticleSummary & { body: string };
+
+export type ArticleList = { articles: ArticleSummary[] };
+
+export function isArticleSummary(value: unknown): value is ArticleSummary {
+  if (!value || typeof value !== "object") return false;
+  const a = value as Record<string, unknown>;
+  return (
+    typeof a.id === "string" &&
+    typeof a.title === "string" &&
+    typeof a.author === "string" &&
+    typeof a.published_at === "number" &&
+    Number.isFinite(a.published_at) &&
+    Array.isArray(a.tags) &&
+    a.tags.every((t) => typeof t === "string")
+  );
+}
+
+export function isArticleList(value: unknown): value is ArticleList {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return Array.isArray(o.articles) && o.articles.every(isArticleSummary);
+}
+
+export function isArticleDetail(value: unknown): value is ArticleDetail {
+  if (!isArticleSummary(value)) return false;
+  return typeof (value as Record<string, unknown>).body === "string";
+}

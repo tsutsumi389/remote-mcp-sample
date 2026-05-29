@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from mcp_server import resources, state as state_module
+from mcp_server.articles import UI_ARTICLES_RESOURCE_URI, article_store
 from mcp_server.dashboard import UI_DASHBOARD_RESOURCE_URI, dashboard_store
 from mcp_server.resources import UI_RESOURCE_MIME, UI_RESOURCE_URI
 from mcp_server.server import mcp
@@ -16,6 +17,7 @@ _COUNTER_TOOLS = {"increment_counter", "reset_counter", "get_counter"}
 _TASK_TOOLS = {"list_tasks", "add_task", "toggle_task"}
 _DASHBOARD_TOOLS = {"get_dashboard", "refresh_dashboard", "acknowledge_alert"}
 _YOUTUBE_TOOLS = {"search_youtube"}
+_ARTICLE_TOOLS = {"list_articles", "get_article_detail"}
 
 _SAMPLE_BUNDLE_HTML = "<!doctype html><html><body>sample bundle</body></html>"
 
@@ -34,6 +36,7 @@ def reset_state() -> None:
     task_store.reset()
     dashboard_store.reset()
     youtube_store.reset()
+    article_store.reset()
 
 
 @pytest.fixture
@@ -270,6 +273,58 @@ async def test_search_youtube_unknown_keyword_returns_empty() -> None:
 async def test_youtube_ui_resource_returns_html_with_apps_profile(mock_bundle_http) -> None:
     contents = await mcp.read_resource(UI_YOUTUBE_RESOURCE_URI)
     assert contents, "ui://youtube returned no content"
+    first = contents[0]
+    assert first.mime_type == UI_RESOURCE_MIME
+    text = first.content
+    assert "<html" in text or "<!doctype html>" in text.lower()
+
+
+async def test_article_tools_expose_ui_articles_meta() -> None:
+    tool_specs = await mcp.list_tools()
+    by_name = {t.name: t for t in tool_specs}
+    assert _ARTICLE_TOOLS <= set(by_name)
+
+    for name in _ARTICLE_TOOLS:
+        meta = by_name[name].meta or {}
+        assert meta.get("ui/resourceUri") == UI_ARTICLES_RESOURCE_URI, (
+            f"{name} missing _meta['ui/resourceUri']"
+        )
+
+
+async def test_list_articles_returns_summaries_without_body() -> None:
+    data = _structured(await mcp.call_tool("list_articles", {}))
+    articles = data["articles"]
+    assert isinstance(articles, list) and len(articles) >= 1
+    first = articles[0]
+    assert isinstance(first["id"], str)
+    assert isinstance(first["title"], str)
+    assert isinstance(first["author"], str)
+    assert isinstance(first["published_at"], (int, float))
+    assert isinstance(first["tags"], list)
+    # The list view must not ship bodies — that shape distinction is what lets
+    # the React App route between the list and detail screens.
+    assert "body" not in first
+
+
+async def test_get_article_detail_returns_body() -> None:
+    listed = _structured(await mcp.call_tool("list_articles", {}))["articles"]
+    article_id = listed[0]["id"]
+
+    detail = _structured(
+        await mcp.call_tool("get_article_detail", {"article_id": article_id})
+    )
+    assert detail["id"] == article_id
+    assert isinstance(detail["body"], str) and detail["body"]
+
+
+async def test_get_article_detail_unknown_id_raises() -> None:
+    with pytest.raises(Exception):
+        await mcp.call_tool("get_article_detail", {"article_id": "no-such-article"})
+
+
+async def test_articles_ui_resource_returns_html_with_apps_profile(mock_bundle_http) -> None:
+    contents = await mcp.read_resource(UI_ARTICLES_RESOURCE_URI)
+    assert contents, "ui://articles returned no content"
     first = contents[0]
     assert first.mime_type == UI_RESOURCE_MIME
     text = first.content

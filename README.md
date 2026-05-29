@@ -2,7 +2,7 @@
 
 リモート MCP サーバー（FastAPI 上に FastMCP の Streamable HTTP をマウント）と、その上で動く **MCP App**（ホスト内 iframe で動くインタラクティブ UI）を一つにまとめた最小モノレポサンプルです。サーバーは FastAPI ベースなので、MCP の `POST /mcp` に加えて通常の HTTP リクエスト（`GET /health` など）も受け付けます。
 
-本サンプルには **3 つの画面** が含まれ、いずれも「サーバーの構造化データ（`structuredContent`）を MCP App 画面に連携して表示する」パターンを示します。3 画面は **同一の単一ファイルバンドル** を共有し、受信データの形に応じて React 側が画面を切り替えます。
+本サンプルには **5 つの画面** が含まれ、いずれも「サーバーの構造化データ（`structuredContent`）を MCP App 画面に連携して表示する」パターンを示します。各画面は **同一の単一ファイルバンドル** を共有し、受信データの形に応じて React 側が画面を切り替えます。
 
 ### 1. カウンター + 履歴チャート（`ui://counter`）
 
@@ -30,6 +30,13 @@
 - サムネイルは外部画像取得を避けるため、各動画の `thumbnail_hue` から決定論的に生成するインライン SVG プレースホルダです
 - 「ユーザー入力 → ツール呼び出し → 構造化データ受信 → 一覧描画」という検索 UI 型のパターンを示します
 
+### 5. 記事一覧 → 記事詳細（`ui://articles`）
+
+- **画面遷移（ナビゲーション）** を示すサンプルです。`list_articles` が `ArticleList`（本文を持たない記事サマリの一覧）を返す → 画面が記事カード一覧として表示
+- 一覧でカードをクリック → `get_article_detail` を呼ぶ → サーバーが本文付きの `ArticleDetail` を返す → 画面が記事詳細に切り替わる
+- 詳細画面の「← Back to list」ボタンは `list_articles` を呼ぶだけ。データは API キー不要のインメモリ・モックです（外部アクセスなし）
+- 一覧（`articles` 配列）と詳細（`body` を持つ単一オブジェクト）は **形が異なる** ため、既存の「データ形による画面振り分け」（型ガード `isArticleList` / `isArticleDetail`）がそのまま遷移ロジックになります。新しいルーティング機構は不要で、ツールを 1 つ足すだけで一覧↔詳細が成立する点が要点です
+
 ## アーキテクチャ
 
 ```
@@ -50,16 +57,19 @@ HTTP  http://localhost:3001
               │   ※ 各ツールに _meta["ui/resourceUri"] = "ui://dashboard"
               ├─ tools: search_youtube
               │   ※ ツールに _meta["ui/resourceUri"] = "ui://youtube"
+              ├─ tools: list_articles / get_article_detail
+              │   ※ 各ツールに _meta["ui/resourceUri"] = "ui://articles"
               ├─ resource: ui://counter   (text/html;profile=mcp-app)
               ├─ resource: ui://tasks     (text/html;profile=mcp-app)
               ├─ resource: ui://dashboard (text/html;profile=mcp-app)
-              └─ resource: ui://youtube   (text/html;profile=mcp-app)
+              ├─ resource: ui://youtube   (text/html;profile=mcp-app)
+              └─ resource: ui://articles  (text/html;profile=mcp-app)
                     │ resources/read のたびに HTTP で取得して中継（インライン返却）
                     ▼
 HTTP  http://mcp-app:4173/ (host: http://localhost:4173/)
   └─ MCP App 配信サーバ (vite preview)
         └─ apps/mcp-app/dist/index.html を配信
-              ※ ui://counter / ui://tasks / ui://dashboard / ui://youtube は同じ単一ファイルを返す
+              ※ ui://counter / ui://tasks / ui://dashboard / ui://youtube / ui://articles は同じ単一ファイルを返す
 ```
 
 HTML の**配信責務は mcp-app 側**（`vite preview`）にあります。MCP Apps SDK はインライン HTML のみ対応（ホストは `resource.contents[0].text` を iframe `srcdoc` で描画し、アプリの URL から直接ロードできない）ため、Python サーバはその HTML を HTTP で取得してインラインで**中継**します。
@@ -162,9 +172,15 @@ curl -s -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"ui://youtube"}}'
+
+# Articles 画面のバンドル（同じ HTML が返る）
+curl -s -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"ui://articles"}}'
 ```
 
-レスポンスの `contents[0].text` が `<!doctype html>` で始まる単一ファイル HTML になっていれば OK です。`ui://counter` / `ui://tasks` / `ui://dashboard` / `ui://youtube` は同一バンドルを返します（画面の出し分けは React 側がデータ形で判定）。
+レスポンスの `contents[0].text` が `<!doctype html>` で始まる単一ファイル HTML になっていれば OK です。`ui://counter` / `ui://tasks` / `ui://dashboard` / `ui://youtube` / `ui://articles` は同一バンドルを返します（画面の出し分けは React 側がデータ形で判定）。
 
 ### 2-1. タスク一覧のデータ連携を確認
 
@@ -209,6 +225,19 @@ curl -s -X POST http://localhost:3001/mcp \
 #   {"name":"search_youtube","arguments":{"query":"","limit":5}}
 ```
 
+### 2-4. 記事一覧 → 詳細のデータ連携を確認
+
+```bash
+# 一覧取得（structuredContent.articles に本文なしのサマリが返る）
+curl -s -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"list_articles","arguments":{}}}'
+
+# 詳細取得（一覧の id を指定 → structuredContent.body に本文が入る）
+#   {"name":"get_article_detail","arguments":{"article_id":"mcp-apps-intro"}}
+```
+
 > 注: 素の curl での `tools/call` は Streamable HTTP セッションの初期化が必要な場合があります。確実に往復を確認したいときは `make test`（pytest, インプロセス実行）か basic-host を使ってください。
 
 ### 3. MCP ホストから接続
@@ -241,16 +270,18 @@ SERVERS='["http://localhost:3001/mcp"]' npm run start
 
 - **状態は in-memory のみ**: マルチプロセス・再起動で値が消えます。永続化は学習の発展課題として残しています。
 - **認証なし**: ローカル開発専用。リモート公開時は OAuth2.1 等を別途追加してください。
-- **MCP Apps `_meta`**: ツール定義の `_meta["ui/resourceUri"]` がリソースに対応する HTML を指定します（キーは `@modelcontextprotocol/ext-apps` の `RESOURCE_URI_META_KEY` 定数と同一）。本サンプルでは `FastMCP.tool(..., meta={"ui/resourceUri": "ui://counter"})` / `"ui://tasks"` / `"ui://dashboard"` / `"ui://youtube"` を利用しています。
+- **MCP Apps `_meta`**: ツール定義の `_meta["ui/resourceUri"]` がリソースに対応する HTML を指定します（キーは `@modelcontextprotocol/ext-apps` の `RESOURCE_URI_META_KEY` 定数と同一）。本サンプルでは `FastMCP.tool(..., meta={"ui/resourceUri": "ui://counter"})` / `"ui://tasks"` / `"ui://dashboard"` / `"ui://youtube"` / `"ui://articles"` を利用しています。
 - **リソース MIME**: `text/html;profile=mcp-app`（同パッケージの `RESOURCE_MIME_TYPE` 定数）。
 - **配信は mcp-app 側 / サーバは中継**: HTML を配信するのは mcp-app の `vite preview`（`MCP_APP_BUNDLE_URL`）です。Python サーバは `resources/read` のたびに HTTP で取得してインライン返却します（接続不可・タイムアウト・非200・サイズ超過時は安全なプレースホルダ HTML にフォールバック）。
 - **単一ファイルが必須な理由**: `@modelcontextprotocol/ext-apps` はインライン HTML のみ対応で、ホストは `resource.contents[0].text` を iframe `srcdoc` で描画します。外部 URL からの読み込みができないため、サーバが返す HTML は自己完結している必要があり、ビルドは単一ファイル（`vite-plugin-singlefile`）のままにしています。
-- **1 バンドル × 複数画面**: Counter / Tasks / Dashboard / YouTube は同じ単一ファイルバンドルを共有します。`ontoolresult` 通知は解決済みリソース URI を確実には含まないため、React 側（`App.tsx`）は受信した `structuredContent` の形（型ガード `isCounterData` / `isTaskList` / `isDashboard` / `isYoutubeSearchResults`）で表示画面を切り替えます。最初のツール結果が来るまでは中立な「読み込み中」画面を表示します。
-- **データ連携の要点**: ツールは Pydantic モデル（`CounterSnapshot` / `TaskList` / `Dashboard` / `YoutubeSearchResults`）を返し、FastMCP が `CallToolResult.structuredContent` を自動生成。React 側は `ontoolresult` / `callServerTool` の `structuredContent` を読んで描画します。サーバー実装は `apps/mcp-server/src/mcp_server/tasks.py` / `dashboard.py` / `youtube.py` を参照。
+- **1 バンドル × 複数画面**: Counter / Tasks / Dashboard / YouTube / Articles は同じ単一ファイルバンドルを共有します。`ontoolresult` 通知は解決済みリソース URI を確実には含まないため、React 側（`App.tsx`）は受信した `structuredContent` の形（型ガード `isCounterData` / `isTaskList` / `isDashboard` / `isYoutubeSearchResults` / `isArticleList` / `isArticleDetail`）で表示画面を切り替えます。最初のツール結果が来るまでは中立な「読み込み中」画面を表示します。
+- **画面遷移もデータ形で表現**: Articles の一覧↔詳細遷移は専用のルーターを持たず、上記の振り分けをそのまま使います。`list_articles` と `get_article_detail` が異なる形（`articles` 配列 / `body` を持つ単一オブジェクト）を返すので、ツール呼び出しの結果がそのまま画面遷移になります。
+- **データ連携の要点**: ツールは Pydantic モデル（`CounterSnapshot` / `TaskList` / `Dashboard` / `YoutubeSearchResults` / `ArticleList` / `ArticleDetail`）を返し、FastMCP が `CallToolResult.structuredContent` を自動生成。React 側は `ontoolresult` / `callServerTool` の `structuredContent` を読んで描画します。サーバー実装は `apps/mcp-server/src/mcp_server/tasks.py` / `dashboard.py` / `youtube.py` / `articles.py` を参照。
 
 ## 拡張ヒント
 
 - 複数 MCP App: `ui://other` リソースを増やし、別ツール群に `_meta.ui.resourceUri` を設定（Tasks / Dashboard / YouTube 画面が実例。`apps/mcp-server/src/mcp_server/tasks.py` / `dashboard.py` / `youtube.py` + `apps/mcp-app/src/TasksScreen.tsx` / `DashboardScreen.tsx` / `YoutubeScreen.tsx`）
+- 画面遷移（一覧→詳細）: 一覧と詳細で異なる形のモデルを返す 2 つのツールを用意し、フロントは型ガードで画面を出し分ける（Articles 画面が実例。`apps/mcp-server/src/mcp_server/articles.py` + `apps/mcp-app/src/ArticlesListScreen.tsx` / `ArticleDetailScreen.tsx`）
 - 永続化: `state.py` を SQLite / Redis 接続に差し替え
 - 認証: FastAPI のミドルウェア / 依存（`Depends`）を MCP マウント（`app.mount("/", ...)`）の前段に挟む。`/health` など公開ルートだけ認証から除外する構成も可能
 - 通常の REST API 追加: `server.py` の FastAPI `app` に `@app.get(...)` / `APIRouter` を足すだけ（MCP は `POST /mcp` のまま共存）
